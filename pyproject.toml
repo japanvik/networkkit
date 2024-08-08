@@ -26,3 +26,6 @@ classifiers = [
 ]
 [project.urls]
 Repository = "https://github.com/japanvik/networkkit"
+
+[tool.hatch.build.targets.wheel]
+packages = ["networkkit"]
