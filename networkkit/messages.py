@@ -21,8 +21,7 @@ class MessageType(str, Enum):
     SYSTEM: System message coming from the data hub.
     SENSOR: Messages for data coming from sensors.
     ERROR: Error messages.
-    MEMORY: A memory cluster.
-    INFO: A response from a previous information request.
+    INFO: A communication for agents on any non conversational or sensor data.
     """
     HELO = "HELO"
     ACK = "ACK"
@@ -30,7 +29,6 @@ class MessageType(str, Enum):
     SYSTEM = "SYSTEM"
     SENSOR = "SENSOR"
     ERROR = "ERROR"
-    MEMORY = "MEMORY"
     INFO = "INFO"
 
 class Message(BaseModel):
