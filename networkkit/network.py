@@ -1,7 +1,10 @@
+import asyncio
 from typing import Any, Protocol
+
+import aiohttp
 import requests
 import zmq
-import asyncio
+
 from networkkit.messages import Message
 
 
@@ -71,13 +74,16 @@ class MessageSender(Protocol):
         raise NotImplementedError
 
 
-import zmq
-import zmq.asyncio
 import asyncio
 import logging
-from typing import Any, Optional, List
-from networkkit.network import Subscriber
+from typing import Any, List, Optional
+
+import zmq
+import zmq.asyncio
+
 from networkkit.messages import Message
+from networkkit.network import Subscriber
+
 
 class ZMQMessageReceiver:
     """
@@ -200,8 +206,9 @@ class HTTPMessageSender:
         """
 
         self.publish_address = publish_address
+        self.session = aiohttp.ClientSession()
 
-    def send_message(self, message: Message) -> requests.Response:
+    async def send_message(self, message: Message) -> str:
         """
         Method to send a message as a JSON payload to the configured HTTP endpoint.
 
@@ -213,6 +220,14 @@ class HTTPMessageSender:
         Returns:
             requests.Response: The response object from the HTTP POST request.
         """
+        try:
+            async with self.session.post(f"{self.publish_address}/data", json=message.model_dump()) as response:
+                if response.status != 200:
+                    logging.error(f"Failed to send message to {self.publish_address}: {response.status}")
+                return await response.text()
+        except Exception as e:
+            logging.error(f"Exception during sending message: {e}")
+            raise e
 
-        response = requests.post(f"{self.publish_address}/data", json=message.model_dump())
-        return response
+    async def close(self):
+        await self.session.close()
