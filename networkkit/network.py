@@ -71,6 +71,14 @@ class MessageSender(Protocol):
         raise NotImplementedError
 
 
+import zmq
+import zmq.asyncio
+import asyncio
+import logging
+from typing import Any, Optional, List
+from networkkit.network import Subscriber
+from networkkit.messages import Message
+
 class ZMQMessageReceiver:
     """
     Class to receive messages using ZeroMQ and distribute them to registered subscribers.
@@ -88,10 +96,10 @@ class ZMQMessageReceiver:
             subscribe_address (str, optional): The ZeroMQ subscriber socket address. Defaults to "tcp://127.0.0.1:5555".
         """
         self.subscribe_address = subscribe_address
-        self.subscribers: list[Subscriber] = []
+        self.subscribers: List[Subscriber] = []
 
-        # ZMQ Context and Socket Setup
-        self.context = zmq.Context()
+        # Initialize zmq.asyncio context and socket
+        self.context = zmq.asyncio.Context()
         self.pubsub_subscriber = self.context.socket(zmq.SUB)
         self.pubsub_subscriber.setsockopt_string(zmq.SUBSCRIBE, "")
         self.pubsub_subscriber.connect(self.subscribe_address)
@@ -101,33 +109,52 @@ class ZMQMessageReceiver:
         """
         Asynchronous method to start receiving messages from the ZeroMQ subscriber socket.
 
-        This method starts an asyncio task that continuously receives messages, validates them, and distributes them to subscribers.
+        This method continuously receives messages, validates them, and distributes them to subscribers.
         It remains running until stopped by the `stop` method.
         """
-
         self.running = True
-        while self.running:
-            try:
-                raw_message = await asyncio.to_thread(self.pubsub_subscriber.recv_json)
-                message = Message.model_validate(raw_message)
-                await self.handle_message(message)
-            except zmq.ZMQError as e:
-                if e.errno != zmq.EAGAIN:
-                    raise
-            except asyncio.CancelledError:
-                # Handle task cancellation gracefully if needed
-                break
+        logging.info(f"ZMQMessageReceiver connected to {self.subscribe_address}")
+        try:
+            while self.running:
+                try:
+                    raw_message = await self.pubsub_subscriber.recv_json(flags=zmq.NOBLOCK)
+                    message = Message.model_validate(raw_message)
+                    await self.handle_message(message)
+                except zmq.Again:
+                    # No message received; sleep briefly to prevent busy waiting
+                    await asyncio.sleep(0.1)
+                except zmq.ZMQError as e:
+                    if e.errno == zmq.ETERM:
+                        # Context terminated
+                        logging.info("ZMQ context terminated.")
+                        break
+                    else:
+                        logging.error(f"ZMQ Error: {e}")
+                        break
+                except asyncio.CancelledError:
+                    # Handle task cancellation gracefully
+                    logging.info("ZMQMessageReceiver task cancelled.")
+                    break
+                except Exception as e:
+                    logging.error(f"Unexpected error in ZMQMessageReceiver: {e}")
+        finally:
+            await self.stop()
 
-    def stop(self):
+    async def stop(self):
         """
-        Method to stop receiving messages and clean up resources.
+        Asynchronous method to stop receiving messages and clean up resources.
 
         This method sets the running flag to False, closes the ZeroMQ socket, and terminates the context.
         """
-
-        self.running = False
-        self.pubsub_subscriber.close()
-        self.context.term()
+        if self.running:
+            self.running = False
+            logging.info("Stopping ZMQMessageReceiver...")
+            try:
+                self.pubsub_subscriber.close(linger=0)
+                self.context.term()
+                logging.info("ZMQMessageReceiver stopped successfully.")
+            except Exception as e:
+                logging.error(f"Error during ZMQMessageReceiver shutdown: {e}")
 
     def register_subscriber(self, subscriber: Subscriber):
         """
@@ -139,8 +166,8 @@ class ZMQMessageReceiver:
         Args:
             subscriber (Subscriber): The subscriber object to be registered.
         """
-
         self.subscribers.append(subscriber)
+        logging.info(f"Subscriber {subscriber.name} registered.")
 
     async def handle_message(self, message: Message):
         """
@@ -152,7 +179,6 @@ class ZMQMessageReceiver:
         Args:
             message: The received message object (type: networkkit.messages.Message)
         """
-
         for subscriber in self.subscribers:
             if subscriber.is_intended_for_me(message):
                 await subscriber.handle_message(message)
@@ -188,5 +214,5 @@ class HTTPMessageSender:
             requests.Response: The response object from the HTTP POST request.
         """
 
-        response = requests.post(f"{self.publish_address}/data", json=message.model_dump_json())
+        response = requests.post(f"{self.publish_address}/data", json=message.model_dump())
         return response
