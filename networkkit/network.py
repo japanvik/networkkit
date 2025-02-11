@@ -206,22 +206,29 @@ class HTTPMessageSender:
         """
 
         self.publish_address = publish_address
-        self.session = aiohttp.ClientSession()
+        self.session = None
 
     async def send_message(self, message: Message) -> str:
         """
         Method to send a message as a JSON payload to the configured HTTP endpoint.
 
-        This method utilizes the `requests` library to send a POST request to the publish address with the message data converted to JSON format.
+        This method utilizes aiohttp to send a POST request to the publish address with the message data converted to JSON format.
 
         Args:
             message: The message object to be sent (type: networkkit.messages.Message)
 
         Returns:
-            requests.Response: The response object from the HTTP POST request.
+            str: The response text from the HTTP POST request.
         """
+        if self.session is None:
+            self.session = aiohttp.ClientSession()
+            
         try:
-            async with self.session.post(f"{self.publish_address}/data", json=message.model_dump()) as response:
+            async with self.session.post(
+                f"{self.publish_address}/data", 
+                json=message.model_dump(),
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
                 if response.status != 200:
                     logging.error(f"Failed to send message to {self.publish_address}: {response.status}")
                 return await response.text()
@@ -230,4 +237,6 @@ class HTTPMessageSender:
             raise e
 
     async def close(self):
-        await self.session.close()
+        if self.session is not None:
+            await self.session.close()
+            self.session = None
