@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from enum import Enum
 
 """
@@ -51,8 +51,7 @@ class Message(BaseModel):
     created_at: str = None  # Optional, set to current time by default
     message_type: MessageType
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
     def __init__(self, **data):
         """
@@ -75,3 +74,5 @@ class MessageResponse(BaseModel):
     """Pydantic model for response
     """
     status: str
+    
+    model_config = ConfigDict()
