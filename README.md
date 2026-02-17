@@ -99,6 +99,47 @@ python -m networkkit.databus
 
 This will start the FastAPI server and the ZeroMQ publisher.
 
+### MCP Send Message Server
+
+NetworkKit also ships a Model Context Protocol (MCP) server that exposes the `send_message` tool over stdio so MCP-compatible agent hosts (such as OpenAI's AgentKit or LangGraph MCP clients) can publish to the NetworkKit bus.
+
+#### Launching the MCP server
+
+Install NetworkKit (plus its optional MCP dependency) and start the MCP server entry point:
+
+```bash
+pip install networkkit
+networkkit-mcp-send-message \
+  --publish-address http://127.0.0.1:8000 \
+  --agent-name example-agent
+```
+
+The server reads from stdin/stdout and registers a single MCP tool named `send_message`. When the MCP client calls the tool, the server forwards the payload to the configured HTTP bus (`/data` endpoint) using the same `HTTPMessageSender` utility the Python SDK uses.
+
+#### Configuration
+
+- `--publish-address` (or `NETWORKKIT_BUS_PUBLISH_ADDRESS`): HTTP endpoint where the NetworkKit databus is accepting POSTs. Defaults to `http://127.0.0.1:8000`.
+- `--agent-name` (or `NETWORKKIT_AGENT_NAME`): Identifier that will populate the `Message.source` field. Defaults to `networkkit`.
+- `--log-level`: Standard Python logging level (e.g. `DEBUG`, `INFO`).
+
+If the MCP host can provide initialization metadata, it may send `{"publish_address": "...", "agent_name": "..."}` during the handshake; these values override both CLI arguments and environment variables for the current session.
+
+#### Tool contract
+
+The tool preserves the original AgentKit contract:
+
+- **Inputs**
+  - `recipient` *(string, required)*: Target agent or broadcast alias.
+  - `content` *(string, required)*: Message body.
+  - `message_type` *(string, optional, default `"CHAT"`)*: One of `HELO`, `ACK`, `CHAT`, `SYSTEM`, `SENSOR`, `ERROR`, or `INFO`.
+- **Outputs**
+  - `status`: `"sent"` when the HTTP publish succeeds.
+  - `message_id`: Generated UUID for client-side tracking.
+  - `recipient`, `message_type`: Echo the invocation parameters.
+  - `metadata`: Includes the effective `publish_address` and `agent_name`.
+
+This symmetry lets existing planners/reminder flows continue to work when migrating from AgentKit's built-in tool to the NetworkKit MCP server.
+
 
 ## Example Code
 

@@ -23,13 +23,18 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.8"
+aiohttp = "*"
 zmq = "*"
 fastapi = "*"
 uvicorn = "*"
 pydantic = "*"
 requests = "*"
+mcp = "*"
 
 # If you have dev/test dependencies, add them here:
 [tool.poetry.dev-dependencies]
 # example:
 # pytest = "^7.0"
+
+[tool.poetry.scripts]
+networkkit-mcp-send-message = "networkkit.mcp.send_message_server:main"
