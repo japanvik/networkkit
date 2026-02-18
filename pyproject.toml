@@ -33,8 +33,10 @@ mcp = "*"
 
 # If you have dev/test dependencies, add them here:
 [tool.poetry.dev-dependencies]
-# example:
-# pytest = "^7.0"
+pytest = "^8.0.0"
 
 [tool.poetry.scripts]
 networkkit-mcp-send-message = "networkkit.mcp.send_message_server:main"
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"

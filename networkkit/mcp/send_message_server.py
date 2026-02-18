@@ -7,9 +7,7 @@ import logging
 import os
 import sys
 import uuid
-from typing import Any, Dict, Optional
-
-from mcp.server import Server
+from typing import Any, Callable, Dict, Optional
 
 from networkkit.messages import Message, MessageType
 from networkkit.network import HTTPMessageSender
@@ -51,9 +49,7 @@ _OUTPUT_SCHEMA: Dict[str, Any] = {
 
 
 class _StateKeys:
-    MESSAGE_SENDER = "message_sender"
-    PUBLISH_ADDRESS = "publish_address"
-    AGENT_NAME = "agent_name"
+    SERVICE = "send_message_service"
 
 
 def _get_env(name: str) -> Optional[str]:
@@ -64,36 +60,39 @@ def _get_env(name: str) -> Optional[str]:
     return stripped if stripped else None
 
 
-def build_server(
-    *,
-    name: str = _SERVER_NAME,
-    publish_address: Optional[str] = None,
-    agent_name: Optional[str] = None,
-) -> Server:
-    """Create a configured MCP server exposing the ``send_message`` tool."""
+def _load_server_cls() -> Any:
+    try:
+        from mcp.server import Server
+    except ImportError as exc:  # pragma: no cover - import error path
+        raise RuntimeError(
+            "The 'mcp' package is required to run the MCP server. "
+            "Install dependencies and retry."
+        ) from exc
+    return Server
 
-    server = Server(name)
-    state = server.state
-    state[_StateKeys.PUBLISH_ADDRESS] = (
-        publish_address
-        or _get_env("NETWORKKIT_BUS_PUBLISH_ADDRESS")
-        or _DEFAULT_PUBLISH_ADDRESS
-    )
-    state[_StateKeys.AGENT_NAME] = (
-        agent_name or _get_env("NETWORKKIT_AGENT_NAME") or "networkkit"
-    )
-    state[_StateKeys.MESSAGE_SENDER] = None
 
-    async def _ensure_sender() -> HTTPMessageSender:
-        sender = state.get(_StateKeys.MESSAGE_SENDER)
-        if sender is None:
-            sender = HTTPMessageSender(
-                publish_address=state[_StateKeys.PUBLISH_ADDRESS]
-            )
-            state[_StateKeys.MESSAGE_SENDER] = sender
-        return sender
+class SendMessageService:
+    """Core send_message logic separated from MCP wiring for easier testing."""
 
-    def _resolve_message_type(value: str) -> MessageType:
+    def __init__(
+        self,
+        *,
+        publish_address: str,
+        agent_name: str,
+        sender_factory: Callable[..., HTTPMessageSender] = HTTPMessageSender,
+    ) -> None:
+        self.publish_address = publish_address
+        self.agent_name = agent_name
+        self._sender_factory = sender_factory
+        self._sender: Optional[HTTPMessageSender] = None
+
+    async def _ensure_sender(self) -> HTTPMessageSender:
+        if self._sender is None:
+            self._sender = self._sender_factory(publish_address=self.publish_address)
+        return self._sender
+
+    @staticmethod
+    def resolve_message_type(value: str) -> MessageType:
         try:
             return MessageType(value)
         except ValueError as exc:
@@ -101,6 +100,59 @@ def build_server(
             raise ValueError(
                 f"Unsupported message_type '{value}'. Expected one of: {expected}."
             ) from exc
+
+    async def send_message(
+        self,
+        *,
+        recipient: str,
+        content: str,
+        message_type: str = MessageType.CHAT.value,
+    ) -> Dict[str, Any]:
+        message_type_enum = self.resolve_message_type(message_type)
+        sender = await self._ensure_sender()
+        outbound_message = Message(
+            source=self.agent_name,
+            to=recipient,
+            content=content,
+            message_type=message_type_enum,
+        )
+        await sender.send_message(outbound_message)
+        return {
+            "status": "sent",
+            "message_id": str(uuid.uuid4()),
+            "recipient": recipient,
+            "message_type": message_type_enum.value,
+            "metadata": {
+                "publish_address": self.publish_address,
+                "agent_name": self.agent_name,
+            },
+        }
+
+    async def close(self) -> None:
+        if self._sender is not None:
+            await self._sender.close()
+            self._sender = None
+
+
+def build_server(
+    *,
+    name: str = _SERVER_NAME,
+    publish_address: Optional[str] = None,
+    agent_name: Optional[str] = None,
+) -> Any:
+    """Create a configured MCP server exposing the ``send_message`` tool."""
+
+    Server = _load_server_cls()
+    server = Server(name)
+    service = SendMessageService(
+        publish_address=(
+            publish_address
+            or _get_env("NETWORKKIT_BUS_PUBLISH_ADDRESS")
+            or _DEFAULT_PUBLISH_ADDRESS
+        ),
+        agent_name=(agent_name or _get_env("NETWORKKIT_AGENT_NAME") or "networkkit"),
+    )
+    server.state[_StateKeys.SERVICE] = service
 
     @server.tool()
     async def send_message(
@@ -110,26 +162,11 @@ def build_server(
     ) -> Dict[str, Any]:
         """Send a message using the configured NetworkKit message sender."""
 
-        message_type_enum = _resolve_message_type(message_type)
-        sender = await _ensure_sender()
-        message = Message(
-            source=state[_StateKeys.AGENT_NAME],
-            to=recipient,
+        return await service.send_message(
+            recipient=recipient,
             content=content,
-            message_type=message_type_enum,
+            message_type=message_type,
         )
-        await sender.send_message(message)
-
-        return {
-            "status": "sent",
-            "message_id": str(uuid.uuid4()),
-            "recipient": recipient,
-            "message_type": message_type_enum.value,
-            "metadata": {
-                "publish_address": state[_StateKeys.PUBLISH_ADDRESS],
-                "agent_name": state[_StateKeys.AGENT_NAME],
-            },
-        }
 
     send_message.mcp_name = "send_message"
     send_message.mcp_description = (
@@ -141,14 +178,13 @@ def build_server(
     return server
 
 
-async def _serve(server: Server) -> None:
+async def _serve(server: Any) -> None:
     try:
         await server.serve_stdio()
     finally:
-        sender = server.state.get(_StateKeys.MESSAGE_SENDER)
-        if sender is not None:
-            await sender.close()
-            server.state[_StateKeys.MESSAGE_SENDER] = None
+        service = server.state.get(_StateKeys.SERVICE)
+        if service is not None:
+            await service.close()
 
 
 def _configure_logging(level: str) -> None:

@@ -122,8 +122,6 @@ The server reads from stdin/stdout and registers a single MCP tool named `send_m
 - `--agent-name` (or `NETWORKKIT_AGENT_NAME`): Identifier that will populate the `Message.source` field. Defaults to `networkkit`.
 - `--log-level`: Standard Python logging level (e.g. `DEBUG`, `INFO`).
 
-If the MCP host can provide initialization metadata, it may send `{"publish_address": "...", "agent_name": "..."}` during the handshake; these values override both CLI arguments and environment variables for the current session.
-
 #### Tool contract
 
 The tool preserves the original AgentKit contract:
@@ -139,6 +137,22 @@ The tool preserves the original AgentKit contract:
   - `metadata`: Includes the effective `publish_address` and `agent_name`.
 
 This symmetry lets existing planners/reminder flows continue to work when migrating from AgentKit's built-in tool to the NetworkKit MCP server.
+
+#### Testing the MCP server
+
+1. Run unit tests for the send-message logic:
+
+```bash
+pytest -q /Users/vkumar/Development/networkkit/tests/test_send_message_service.py
+```
+
+2. Run an end-to-end smoke test (stdio MCP server + fake HTTP databus):
+
+```bash
+python /Users/vkumar/Development/networkkit/scripts/mcp_send_message_smoke_test.py
+```
+
+The smoke test starts a local fake bus, launches `networkkit.mcp.send_message_server`, performs `initialize`, `tools/list`, and `tools/call` MCP RPCs, and verifies that a `CHAT` message is published with the expected source/recipient/content.
 
 
 ## Example Code

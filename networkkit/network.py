@@ -1,9 +1,10 @@
 import asyncio
-from typing import Any, Protocol
+import logging
+from typing import Any, List, Protocol
 
 import aiohttp
-import requests
 import zmq
+import zmq.asyncio
 
 from networkkit.messages import Message
 
@@ -72,17 +73,6 @@ class MessageSender(Protocol):
         """
 
         raise NotImplementedError
-
-
-import asyncio
-import logging
-from typing import Any, List, Optional
-
-import zmq
-import zmq.asyncio
-
-from networkkit.messages import Message
-from networkkit.network import Subscriber
 
 
 class ZMQMessageReceiver:
