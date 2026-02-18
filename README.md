@@ -1,22 +1,74 @@
 # NetworkKit
 
-NetworkKit is a simple yet powerful communication framework designed to streamline the interaction between distributed agents. Originally built for AI agent swarms, NetworkKit leverages both publish/subscribe (pub/sub) and HTTP protocols to enable seamless and scalable message exchange across diverse systems. Whether you are building a network of IoT devices, a microservices architecture, or orchestrating interactions within AI agent swarms, NetworkKit provides the necessary tools and abstractions to ensure reliable and efficient communication.
+NetworkKit is a transport and protocol layer for multi-agent systems.
+
+It exists to make independent AI agents communicate through one shared contract:
+
+- one message schema (`source`, `to`, `content`, `message_type`, `created_at`)
+- one delivery pattern (HTTP ingress + ZeroMQ pub/sub fanout)
+- one interoperable tool interface (`send_message` via MCP)
+
+This lets you build swarms or networks of agents that can be developed and deployed independently while still speaking the same language on the wire.
 
 ## Features
 
-- **Message Handling**: Define and manage various message types and content, including support for multiple message categories such as chat, system updates, and sensor data.
-- **ZeroMQ Integration**: Efficiently publish and subscribe to messages using ZeroMQ, enabling high-performance asynchronous communication.
-- **HTTP Integration**: Send and receive messages via HTTP using FastAPI, providing flexibility for web-based communication.
-- **Pydantic Models**: Leverage Pydantic for robust data validation and serialization, ensuring data integrity and ease of use.
-- **Asynchronous Communication**: Support for asynchronous message handling, allowing non-blocking operations and improved performance in distributed systems.
-- **Extensible Architecture**: Easily extend the framework to support additional protocols or custom message handling logic.
+- **Standardized Agent Message Protocol**: Shared `Message` model and `MessageType` enum for consistent inter-agent semantics.
+- **Decoupled Delivery**: HTTP publisher endpoint for writes, ZeroMQ pub/sub for fanout to many listening agents.
+- **Framework Interop via MCP**: `send_message` exposed as an MCP server so tool-enabled agent runtimes can use the same bus.
+- **Async-first Runtime**: Non-blocking send/receive primitives for long-lived agent processes.
+- **Simple Operational Model**: Run one databus, connect many agent processes.
+
+## Why this matters
+
+Without a shared transport contract, every agent framework integration becomes custom glue code.
+
+NetworkKit gives you a stable boundary:
+
+- planners can target `send_message` once
+- agents can swap runtimes without changing bus semantics
+- orchestration logic can reason about message types, recipients, and delivery paths consistently
 
 ## Installation
 
-To install NetworkKit, use pip to install the package:
+For local development with `uv`:
+
+```bash
+uv venv .venv
+source .venv/bin/activate
+uv sync --group dev
+```
+
+To install from PyPI in a separate project:
 
 ```bash
 pip install networkkit
+```
+
+## Quickstart: Two Independent Agents
+
+This repository includes a runnable two-process example:
+
+- `/Users/vkumar/Development/networkkit/examples/two_agent_chat/agent_chat_process.py`
+- `/Users/vkumar/Development/networkkit/examples/two_agent_chat/README.md`
+
+Run one databus process and two independent agent processes; they exchange `CHAT` messages over the shared bus.
+
+```bash
+# Terminal 1
+python -m networkkit.databus
+
+# Terminal 2
+python examples/two_agent_chat/agent_chat_process.py \
+  --name agent-beta \
+  --peer agent-alpha \
+  --runtime-seconds 40
+
+# Terminal 3
+python examples/two_agent_chat/agent_chat_process.py \
+  --name agent-alpha \
+  --peer agent-beta \
+  --startup-message "hello from alpha" \
+  --runtime-seconds 40
 ```
 
 ## Usage
@@ -159,36 +211,41 @@ The smoke test starts a local fake bus, launches `networkkit.mcp.send_message_se
 
 Here is an example of how to use NetworkKit to send and receive messages:
 ```python
+import asyncio
 from networkkit.messages import Message, MessageType
 from networkkit.network import ZMQMessageReceiver, HTTPMessageSender
 
-# Example message
-message = Message(
-    source="Agent1",
-    to="Agent2",
-    content="Hello, Agent2!",
-    message_type=MessageType.CHAT
-)
+async def main():
+    # Example message
+    message = Message(
+        source="Agent1",
+        to="Agent2",
+        content="Hello, Agent2!",
+        message_type=MessageType.CHAT
+    )
 
-# Sending a message over HTTP
-sender = HTTPMessageSender(publish_address="http://127.0.0.1:8000")
-response = sender.send_message(message)
-print(response.status_code)
+    # Sending a message over HTTP
+    sender = HTTPMessageSender(publish_address="http://127.0.0.1:8000")
+    response = await sender.send_message(message)
+    print(response)
+    await sender.close()
 
-# Receiving messages with ZMQ
-receiver = ZMQMessageReceiver(subscribe_address="tcp://127.0.0.1:5555")
+    # Receiving messages with ZMQ
+    receiver = ZMQMessageReceiver(subscribe_address="tcp://127.0.0.1:5555")
 
-class MySubscriber:
-    name = "Agent2"
+    class MySubscriber:
+        name = "Agent2"
 
-    async def handle_message(self, message: Message):
-        print(f"Received message: {message.content}")
+        async def handle_message(self, message: Message):
+            print(f"Received message: {message.content}")
 
-    def is_intended_for_me(self, message: Message) -> bool:
-        return message.to == self.name or message.to == "ALL"
+        def is_intended_for_me(self, message: Message) -> bool:
+            return message.to == self.name or message.to == "ALL"
 
-receiver.register_subscriber(MySubscriber())
-asyncio.run(receiver.start())
+    receiver.register_subscriber(MySubscriber())
+    await receiver.start()
+
+asyncio.run(main())
 ```
 
 ## Contributing

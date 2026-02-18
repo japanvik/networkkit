@@ -1,42 +1,42 @@
 [build-system]
-# Poetry requires at least version 1.0.0 of poetry-core
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
 
-[tool.poetry]
+[project]
 name = "networkkit"
 version = "0.0.2"
 description = "A simple communication framework for agents using pubsub and http"
-# If your LICENSE file indicates a specific license (e.g., MIT),
-# you can replace this with `license = "MIT"`
-license = "Apache-2.0"
 readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10,<4.0"
 authors = [
-  "Vikram Kumar <vik@japanvik.net>"
+  { name = "Vikram Kumar", email = "vik@japanvik.net" }
 ]
-homepage = "https://github.com/japanvik/networkkit"
 keywords = ["network agents", "pubsub", "framework", "communication"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python"
 ]
+dependencies = [
+  "aiohttp",
+  "pyzmq",
+  "fastapi",
+  "uvicorn",
+  "pydantic",
+  "requests",
+  "mcp"
+]
 
-[tool.poetry.dependencies]
-python = ">=3.8"
-aiohttp = "*"
-zmq = "*"
-fastapi = "*"
-uvicorn = "*"
-pydantic = "*"
-requests = "*"
-mcp = "*"
+[project.urls]
+Homepage = "https://github.com/japanvik/networkkit"
 
-# If you have dev/test dependencies, add them here:
-[tool.poetry.dev-dependencies]
-pytest = "^8.0.0"
-
-[tool.poetry.scripts]
+[project.scripts]
 networkkit-mcp-send-message = "networkkit.mcp.send_message_server:main"
 
-[tool.pytest.ini_options]
-asyncio_default_fixture_loop_scope = "function"
+[tool.setuptools.packages.find]
+include = ["networkkit*"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0.0,<9"
+]
