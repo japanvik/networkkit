@@ -71,6 +71,11 @@ python examples/two_agent_chat/agent_chat_process.py \
   --runtime-seconds 40
 ```
 
+## More Examples
+
+- Two-process chat: `/Users/vkumar/Development/networkkit/examples/two_agent_chat/README.md`
+- MCP send -> echo reply -> network monitor: `/Users/vkumar/Development/networkkit/examples/mcp_echo_monitor/README.md`
+
 ## Usage
 
 ### Message Data Structures

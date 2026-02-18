@@ -60,15 +60,15 @@ def _get_env(name: str) -> Optional[str]:
     return stripped if stripped else None
 
 
-def _load_server_cls() -> Any:
+def _load_fastmcp_cls() -> Any:
     try:
-        from mcp.server import Server
+        from mcp.server import FastMCP
     except ImportError as exc:  # pragma: no cover - import error path
         raise RuntimeError(
             "The 'mcp' package is required to run the MCP server. "
             "Install dependencies and retry."
         ) from exc
-    return Server
+    return FastMCP
 
 
 class SendMessageService:
@@ -142,8 +142,8 @@ def build_server(
 ) -> Any:
     """Create a configured MCP server exposing the ``send_message`` tool."""
 
-    Server = _load_server_cls()
-    server = Server(name)
+    FastMCP = _load_fastmcp_cls()
+    server = FastMCP(name)
     service = SendMessageService(
         publish_address=(
             publish_address
@@ -152,9 +152,12 @@ def build_server(
         ),
         agent_name=(agent_name or _get_env("NETWORKKIT_AGENT_NAME") or "networkkit"),
     )
-    server.state[_StateKeys.SERVICE] = service
+    setattr(server, _StateKeys.SERVICE, service)
 
-    @server.tool()
+    @server.tool(
+        name="send_message",
+        description="Send a message to another agent or entity on the NetworkKit bus.",
+    )
     async def send_message(
         recipient: str,
         content: str,
@@ -168,23 +171,16 @@ def build_server(
             message_type=message_type,
         )
 
-    send_message.mcp_name = "send_message"
-    send_message.mcp_description = (
-        "Send a message to another agent or entity on the NetworkKit bus."
-    )
-    send_message.input_schema = _INPUT_SCHEMA
-    send_message.output_schema = _OUTPUT_SCHEMA
-
     return server
 
 
-async def _serve(server: Any) -> None:
+def _serve(server: Any) -> None:
     try:
-        await server.serve_stdio()
+        server.run(transport="stdio")
     finally:
-        service = server.state.get(_StateKeys.SERVICE)
+        service = getattr(server, _StateKeys.SERVICE, None)
         if service is not None:
-            await service.close()
+            asyncio.run(service.close())
 
 
 def _configure_logging(level: str) -> None:
@@ -221,7 +217,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         publish_address=args.publish_address,
         agent_name=args.agent_name,
     )
-    asyncio.run(_serve(server))
+    _serve(server)
 
 
 if __name__ == "__main__":
