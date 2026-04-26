@@ -207,7 +207,6 @@ async def scheduler_loop():
     """Run scheduled messages based on interval or cron."""
     last_run: dict[str, float] = {}
     last_cron_minute: dict[str, str] = {}  # track last fired minute to avoid double-fire
-    logger.info("Scheduler loop started")
     while True:
         try:
             now_mono = asyncio.get_event_loop().time()
