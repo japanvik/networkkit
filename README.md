@@ -1,148 +1,158 @@
 # NetworkKit
 
-NetworkKit is a simple yet powerful communication framework designed to streamline the interaction between distributed agents. Originally built for AI agent swarms, NetworkKit leverages both publish/subscribe (pub/sub) and HTTP protocols to enable seamless and scalable message exchange across diverse systems. Whether you are building a network of IoT devices, a microservices architecture, or orchestrating interactions within AI agent swarms, NetworkKit provides the necessary tools and abstractions to ensure reliable and efficient communication.
+A lightweight communication framework for distributed agents. Pub/sub messaging (ZeroMQ), HTTP ingress (FastAPI), built-in scheduling, and a single CLI to manage it all.
+
+NetworkKit is the connective tissue for multi-agent systems. Agents don't need to know about each other — they just publish and subscribe to a shared bus. Chat bots, automation workflows, AI agents, hardware sensors — they all speak the same protocol. No broker setup, no YAML sprawl, no infrastructure overhead. One `netkit start` and you have a running message bus with scheduled tasks that everything can talk to.
 
 ## Features
 
-- **Message Handling**: Define and manage various message types and content, including support for multiple message categories such as chat, system updates, and sensor data.
-- **ZeroMQ Integration**: Efficiently publish and subscribe to messages using ZeroMQ, enabling high-performance asynchronous communication.
-- **HTTP Integration**: Send and receive messages via HTTP using FastAPI, providing flexibility for web-based communication.
-- **Pydantic Models**: Leverage Pydantic for robust data validation and serialization, ensuring data integrity and ease of use.
-- **Asynchronous Communication**: Support for asynchronous message handling, allowing non-blocking operations and improved performance in distributed systems.
-- **Extensible Architecture**: Easily extend the framework to support additional protocols or custom message handling logic.
+- **Message bus**: ZeroMQ pub/sub + HTTP POST ingress
+- **Scheduler**: interval and cron-based message scheduling (UTC)
+- **Auth**: optional token-based access control
+- **Config**: TOML config file with env var overrides
+- **CLI**: `netkit` for daemon and schedule management
+- **Persistence**: schedules survive restarts
 
-## Installation
-
-To install NetworkKit, use pip to install the package:
+## Install
 
 ```bash
 pip install networkkit
 ```
 
-## Usage
-
-### Message Data Structures
-
-The `messages.py` module defines the message data structures used for communication within the NetworkKit framework.
-
-#### Message
-
-The `Message` class is a Pydantic model representing a message object exchanged through the data bus. It provides a structured way to define and validate the content of messages, ensuring consistency and reliability in communication.
-
-Attributes:
-- `source` (str): The source of the message (e.g., agent name, sensor name).
-- `to` (str): The intended recipient of the message (e.g., agent name, or 'ALL' for broadcast).
-- `content` (str): The actual message content in string format.
-- `created_at` (str, optional): The timestamp of when the message was created. If not provided, it will be automatically set to the current time by the databus.
-- `message_type` (MessageType): The type of message as defined by the `MessageType` enumeration.
-
-Example:
-```python
-from networkkit.messages import Message, MessageType
-
-message = Message(
-    source="Agent1",
-    to="Agent2",
-    content="Hello, Agent2!",
-    message_type=MessageType.CHAT
-)
-```
-
-#### MessageType
-
-An enumeration class representing the different message types used in NetworkKit:
-
-- `HELO`: Indicates a login request or checking if the agent “to” is available.
-- `ACK`: Response to a HELO request, indicating the agent is available.
-- `CHAT`: Text message intended for conversation.
-- `SYSTEM`: System message coming from the data hub.
-- `SENSOR`: Messages for data coming from sensors.
-- `ERROR`: Error messages.
-- `INFO`: A communication for agents on any non conversational or sensor data.
-
-### Network Module
-
-The `network.py` module provides interfaces and implementations for message sending and receiving.
-
-#### Subscriber Protocol
-
-Defines the interface for subscribers to the bus that can recieve and handle Messages. Subscribers must implement the following methods:
-
-- `handle_message(self, message: Message) -> Any`: Asynchronous method for handling received messages.
-- `is_intended_for_me(self, message: Message) -> bool`: Method to determine if a message is intended for this subscriber.
-
-#### MessageSender Protocol
-
-Defines the interface for senders that send messages over the network. Implementations must provide the following method:
-
-- `send_message(self, message: Message) -> Any`: Method to send a message over the network.
-
-#### ZMQMessageReceiver
-
-Class to receive messages using ZeroMQ and distribute them to registered subscribers. Implementors of the Suscriber protocol can register to subscribe to this receiver. It establishes a ZeroMQ subscriber socket, listens for messages, and distributes them to registered subscribers based on their `is_intended_for_me` method.
-
-#### HTTPMessageSender
-
-Class to send messages over HTTP using the `requests` library. It sends messages as JSON payloads to a specified HTTP endpoint.
-
-### Data Bus
-
-The `databus.py` module provides a data bus service for publishing messages using ZeroMQ and a FastAPI interface (HTTP) for receiving messages. Incoming Messages via the HTTP endpoint will be published via the ZeroMQ for subscribers to pick up.
-
-#### Running the Data Bus
-
-1. Execute the script from the console:
+## Quick Start
 
 ```bash
-python -m networkkit.databus
+# Start the databus
+netkit start
+
+# Check status
+netkit status
+
+# Send a message
+netkit send "hello" --to agent1 --type CHAT
+
+# Add a scheduled message (every 5 minutes)
+netkit schedule add --name heartbeat --to agent1 --type CHAT --interval 5m --content "ping"
+
+# Add a cron job (daily at 09:00 UTC)
+netkit schedule add --name daily-check --to agent1 --type CHAT --cron "0 9 * * *" --content "daily review"
+
+# List schedules
+netkit schedule list
+
+# Trigger a schedule now
+netkit schedule run heartbeat
+
+# Remove a schedule
+netkit schedule remove heartbeat
+
+# View logs
+netkit log -n 50
+
+# Stop
+netkit stop
 ```
 
-This will start the FastAPI server and the ZeroMQ publisher.
+## Configuration
 
+Config file is searched in order:
+1. `$NETWORKKIT_CONFIG` env var
+2. `./networkkit.toml`
+3. `~/.config/networkkit/networkkit.toml`
 
-## Example Code
+```toml
+[server]
+host = "0.0.0.0"
+port = 8000
+zmq_port = 5555
+# auth_token = "your-secret-token"
+data_dir = "~/.local/share/networkkit"
+log_level = "INFO"
+```
 
-Here is an example of how to use NetworkKit to send and receive messages:
+All settings can be overridden with env vars: `NETWORKKIT_HOST`, `NETWORKKIT_PORT`, `NETWORKKIT_ZMQ_PORT`, `NETWORKKIT_AUTH_TOKEN`, `NETWORKKIT_DATA_DIR`, `NETWORKKIT_LOG_LEVEL`.
+
+## Message Types
+
+| Type | Description |
+|------|-------------|
+| `CHAT` | Conversational message |
+| `SYSTEM` | System/infrastructure message |
+| `INFO` | Non-conversational notification |
+| `SENSOR` | Sensor data |
+| `HELO` | Availability check |
+| `ACK` | Availability response |
+| `ERROR` | Error notification |
+
+## API Endpoints
+
+All endpoints accept an optional `X-NetworkKit-Token` header when auth is enabled.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/data` | Publish a message to the bus |
+| `GET` | `/schedules` | List all schedules |
+| `POST` | `/schedules` | Create/update a schedule |
+| `DELETE` | `/schedules/{name}` | Remove a schedule |
+| `POST` | `/schedules/{name}/run` | Trigger a schedule immediately |
+
+### Message format
+
+```json
+{
+  "source": "agent1",
+  "to": "agent2",
+  "content": "hello",
+  "message_type": "CHAT"
+}
+```
+
+### Schedule format
+
+```json
+{
+  "name": "heartbeat",
+  "to": "agent1",
+  "message_type": "CHAT",
+  "content": "ping",
+  "interval": "5m",
+  "enabled": true
+}
+```
+
+Interval supports: `30s`, `5m`, `1h`, `1d` or raw seconds. Cron uses standard 5-field UTC expressions (minute hour day month weekday, 0=Sunday).
+
+## Python API
+
 ```python
 from networkkit.messages import Message, MessageType
-from networkkit.network import ZMQMessageReceiver, HTTPMessageSender
+from networkkit.network import HTTPMessageSender, ZMQMessageReceiver
 
-# Example message
-message = Message(
-    source="Agent1",
-    to="Agent2",
-    content="Hello, Agent2!",
-    message_type=MessageType.CHAT
-)
-
-# Sending a message over HTTP
+# Send a message
 sender = HTTPMessageSender(publish_address="http://127.0.0.1:8000")
-response = sender.send_message(message)
-print(response.status_code)
+await sender.send_message(Message(
+    source="agent1", to="agent2",
+    content="hello", message_type=MessageType.CHAT,
+))
 
-# Receiving messages with ZMQ
-receiver = ZMQMessageReceiver(subscribe_address="tcp://127.0.0.1:5555")
-
+# Subscribe to messages
 class MySubscriber:
-    name = "Agent2"
+    name = "agent2"
+    def is_intended_for_me(self, message): return message.to in (self.name, "ALL")
+    async def handle_message(self, message): print(message.content)
 
-    async def handle_message(self, message: Message):
-        print(f"Received message: {message.content}")
-
-    def is_intended_for_me(self, message: Message) -> bool:
-        return message.to == self.name or message.to == "ALL"
-
+receiver = ZMQMessageReceiver(subscribe_address="tcp://127.0.0.1:5555")
 receiver.register_subscriber(MySubscriber())
-asyncio.run(receiver.start())
+await receiver.start()
 ```
 
-## Contributing
+## Runtime Files
 
-Contributions are welcome! Please fork the repository and submit a pull request.
+- Config: `~/.config/networkkit/networkkit.toml`
+- Schedules: `~/.local/share/networkkit/schedules.json`
+- PID: `~/.local/share/networkkit/databus.pid`
+- Log: `~/.local/share/networkkit/databus.log`
 
 ## License
 
-This project is licensed under the terms of the MIT license. See the LICENSE file for details.
-
-## Authors
-	•	Vikram Kumar - vik@japanvik.net
+Apache-2.0
