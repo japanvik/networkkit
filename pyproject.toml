@@ -22,12 +22,15 @@ classifiers = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.8"
+python = ">=3.11"
 zmq = "*"
 fastapi = "*"
 uvicorn = "*"
 pydantic = "*"
 requests = "*"
+
+[tool.poetry.scripts]
+netkit = "networkkit.cli:main"
 
 # If you have dev/test dependencies, add them here:
 [tool.poetry.dev-dependencies]
