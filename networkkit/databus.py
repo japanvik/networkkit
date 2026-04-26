@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import os
 from logging import DEBUG, INFO
 import uvicorn
 import zmq
@@ -50,6 +51,7 @@ async def send_message(message: Message):
         return {"status": "error"}
 
 async def time_publisher_task():
+    interval = int(os.environ.get("NETWORKKIT_TIME_PUBLISHER_INTERVAL", "3600"))
     while True:
         current_time = datetime.datetime.now().isoformat()
         message = Message(
@@ -60,7 +62,7 @@ async def time_publisher_task():
             message_type=MessageType.SYSTEM
         )
         await send_message(message)
-        await asyncio.sleep(300)
+        await asyncio.sleep(interval)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
