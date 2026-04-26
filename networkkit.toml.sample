@@ -1,0 +1,13 @@
+# NetworkKit Databus Configuration
+# Place at ~/.config/networkkit/networkkit.toml or set NETWORKKIT_CONFIG=/path/to/file
+
+[server]
+host = "0.0.0.0"
+port = 8000
+zmq_port = 5555
+# auth_token = "your-secret-token"  # uncomment to require auth
+data_dir = "~/.local/share/networkkit"
+log_level = "INFO"
+
+# Schedules are managed via the API and persisted to data_dir/schedules.json
+# Use: netkit schedule add --name "heartbeat" --to megu --interval 5m --content "check"
