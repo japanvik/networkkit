@@ -5,7 +5,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "networkkit"
-version = "0.1.1"
+version = "0.1.2"
 description = "A simple communication framework for agents using pubsub and http"
 # If your LICENSE file indicates a specific license (e.g., MIT),
 # you can replace this with `license = "MIT"`
