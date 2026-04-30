@@ -122,7 +122,13 @@ def run_bridge(local_zmq: str, remote_zmq: str,
                 if to in local_agents or is_helo_ack:
                     try:
                         msg["source"] = f"bridge:{msg.get('source', 'unknown')}"
+                        # Write to local bus
                         requests.post(f"{local_http}/data", json=msg, timeout=5)
+                        # Also write to mailbox for harness bridge
+                        mailbox = Path.home() / ".local" / "share" / "kiro-harness" / "mailbox"
+                        mailbox.mkdir(parents=True, exist_ok=True)
+                        ts = time.time()
+                        (mailbox / f"{ts:.6f}.json").write_text(json.dumps(msg))
                         log.info("REMOTE→LOCAL [%s→%s]: %s", source, to, msg.get("content", "")[:60])
                     except Exception as e:
                         log.warning("Failed to forward to local: %s", e)

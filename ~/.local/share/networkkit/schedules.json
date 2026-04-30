@@ -8,6 +8,15 @@
       "interval_seconds": 1800,
       "cron": null,
       "enabled": true
+    },
+    {
+      "name": "sophia-work",
+      "to": "sophia",
+      "message_type": "CHAT",
+      "content": "continue",
+      "interval_seconds": 900,
+      "cron": null,
+      "enabled": true
     }
   ]
 }
