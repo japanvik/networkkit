@@ -188,6 +188,13 @@ def main():
     send.add_argument("--source", default="netkit-cli")
     send.add_argument("--type", default="INFO")
 
+    # Bridge
+    br = sub.add_parser("bridge", help="Bridge two databus instances")
+    br.add_argument("--remote", default="tcp://192.168.0.103:5555", help="Remote ZMQ address")
+    br.add_argument("--remote-http", default="http://192.168.0.103:8000", help="Remote HTTP API")
+    br.add_argument("--local-agents", default="sophia", help="Comma-separated local agent names")
+    br.add_argument("--remote-agents", default="megu", help="Comma-separated remote agent names")
+
     args = p.parse_args()
     dispatch = {
         "start": cmd_start, "stop": cmd_stop, "restart": cmd_restart,
@@ -201,6 +208,12 @@ def main():
             sc_dispatch[args.action](args)
         else:
             sc.print_help()
+    elif args.command == "bridge":
+        from networkkit.bridge import run_bridge
+        local_agents = {a.strip().lower() for a in args.local_agents.split(",")}
+        remote_agents = {a.strip().lower() for a in args.remote_agents.split(",")}
+        run_bridge("tcp://127.0.0.1:5555", args.remote,
+                   BUS_URL, args.remote_http, local_agents, remote_agents)
     else:
         p.print_help()
 

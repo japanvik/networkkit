@@ -1,0 +1,13 @@
+{
+  "schedules": [
+    {
+      "name": "sophia-hb",
+      "to": "sophia",
+      "message_type": "CHAT",
+      "content": "hb",
+      "interval_seconds": 1800,
+      "cron": null,
+      "enabled": true
+    }
+  ]
+}
