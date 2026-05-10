@@ -8,6 +8,7 @@ import datetime
 import json
 import logging
 import os
+import time
 import tomllib
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,6 +24,98 @@ from networkkit.messages import Message, MessageType
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
+
+# ── Routing Table ──────────────────────────────────────────────────
+
+PEER_TTL_SECONDS = 90  # peers expire after this many seconds without HELO/ACK
+
+
+class PeerEntry:
+    __slots__ = ("name", "description", "last_seen", "bus_origin")
+
+    def __init__(self, name: str, description: str = "", bus_origin: str = "local"):
+        self.name = name
+        self.description = description
+        self.last_seen = time.time()
+        self.bus_origin = bus_origin
+
+    def refresh(self, description: str = "", bus_origin: str | None = None):
+        self.last_seen = time.time()
+        if description:
+            self.description = description
+        if bus_origin is not None:
+            self.bus_origin = bus_origin
+
+    def is_alive(self) -> bool:
+        return (time.time() - self.last_seen) < PEER_TTL_SECONDS
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "description": self.description,
+            "last_seen": self.last_seen,
+            "age_seconds": round(time.time() - self.last_seen, 1),
+            "bus_origin": self.bus_origin,
+            "alive": self.is_alive(),
+        }
+
+
+class RoutingTable:
+    def __init__(self):
+        self._peers: dict[str, PeerEntry] = {}
+
+    def update_peer(self, name: str, description: str = "", bus_origin: str = "local") -> None:
+        if name in self._peers:
+            self._peers[name].refresh(description, bus_origin)
+        else:
+            self._peers[name] = PeerEntry(name, description, bus_origin)
+            logger.info("Peer registered: %s (%s) via %s", name, description[:60], bus_origin)
+
+    def remove_peer(self, name: str) -> bool:
+        return self._peers.pop(name, None) is not None
+
+    def get_peer(self, name: str) -> PeerEntry | None:
+        peer = self._peers.get(name)
+        if peer and peer.is_alive():
+            return peer
+        return None
+
+    def get_bus_origin(self, name: str) -> str | None:
+        peer = self.get_peer(name)
+        return peer.bus_origin if peer else None
+
+    def list_peers(self, include_expired: bool = False) -> list[dict]:
+        if include_expired:
+            return [p.to_dict() for p in self._peers.values()]
+        return [p.to_dict() for p in self._peers.values() if p.is_alive()]
+
+    def expire(self) -> list[str]:
+        expired = [name for name, p in self._peers.items() if not p.is_alive()]
+        for name in expired:
+            del self._peers[name]
+            logger.info("Peer expired: %s", name)
+        return expired
+
+
+ROUTING_TABLE = RoutingTable()
+
+
+def _process_helo_ack(message: Message) -> None:
+    """Extract HELO/ACK from a SYSTEM message and update routing table."""
+    try:
+        payload = json.loads(message.content)
+    except (json.JSONDecodeError, TypeError):
+        return
+    msg_type = payload.get("type")
+    if msg_type not in ("HELO", "ACK"):
+        return
+    peer_name = payload.get("agent", "").strip()
+    if not peer_name:
+        return
+    description = payload.get("description", "")
+    bus_origin = "router" if message.source.startswith("router:") else "local"
+    ROUTING_TABLE.update_peer(peer_name, description, bus_origin)
+
 
 # ── Config ──────────────────────────────────────────────────────────
 
@@ -80,6 +173,8 @@ async def send_message(message: Message):
     try:
         if not message.created_at:
             message.created_at = datetime.datetime.now().isoformat()
+        if message.message_type == MessageType.SYSTEM.value:
+            _process_helo_ack(message)
         publisher.send_json(message.model_dump())
         return {"status": "success"}
     except Exception as e:
@@ -248,9 +343,20 @@ async def scheduler_loop():
 
 # ── FastAPI App ─────────────────────────────────────────────────────
 
+async def peer_expiry_loop():
+    """Periodically expire stale peers from the routing table."""
+    while True:
+        try:
+            ROUTING_TABLE.expire()
+        except Exception:
+            logger.exception("Peer expiry loop error")
+        await asyncio.sleep(30)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     asyncio.create_task(scheduler_loop())
+    asyncio.create_task(peer_expiry_loop())
     yield
 
 
@@ -305,6 +411,14 @@ async def delete_schedule(name: str, request: Request):
     if STORE and STORE.remove(name):
         return {"status": "deleted", "name": name}
     return JSONResponse({"status": "error", "detail": "not found"}, status_code=404)
+
+
+@app.get("/peers")
+async def list_peers(request: Request):
+    if not _check_auth(request):
+        return JSONResponse({"status": "error", "detail": "unauthorized"}, status_code=401)
+    all_param = request.query_params.get("all", "").lower() in ("1", "true", "yes")
+    return {"peers": ROUTING_TABLE.list_peers(include_expired=all_param)}
 
 
 @app.post("/schedules/{name}/run")

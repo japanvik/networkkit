@@ -143,6 +143,26 @@ def cmd_schedule_run(args):
     _out(r.json())
 
 
+# ── Peers command ──────────────────────────────────────────────────
+
+def cmd_peers(args):
+    params = {}
+    if hasattr(args, "all") and args.all:
+        params["all"] = "1"
+    r = requests.get(_url("/peers"), headers=_headers(), params=params, timeout=10)
+    data = r.json()
+    peers = data.get("peers", [])
+    if not peers:
+        print("No peers registered")
+        return
+    print(f"{'NAME':<20} {'BUS':<8} {'AGE':<8} {'STATUS':<8} DESCRIPTION")
+    print("-" * 70)
+    for p in peers:
+        status = "alive" if p.get("alive") else "expired"
+        age = f"{int(p.get('age_seconds', 0))}s"
+        print(f"{p['name']:<20} {p.get('bus_origin','?'):<8} {age:<8} {status:<8} {p.get('description','')[:30]}")
+
+
 # ── Send command ────────────────────────────────────────────────────
 
 def cmd_send(args):
@@ -181,6 +201,10 @@ def main():
     run = sc_sub.add_parser("run", help="Trigger a schedule now")
     run.add_argument("name")
 
+    # Peers
+    peers_p = sub.add_parser("peers", help="Show registered peers on the bus")
+    peers_p.add_argument("--all", action="store_true", help="Include expired peers")
+
     # Send
     send = sub.add_parser("send", help="Send a message to the bus")
     send.add_argument("content", help="Message content")
@@ -191,7 +215,7 @@ def main():
     args = p.parse_args()
     dispatch = {
         "start": cmd_start, "stop": cmd_stop, "restart": cmd_restart,
-        "status": cmd_status, "log": cmd_log, "send": cmd_send,
+        "status": cmd_status, "log": cmd_log, "send": cmd_send, "peers": cmd_peers,
     }
     if args.command in dispatch:
         dispatch[args.command](args)
