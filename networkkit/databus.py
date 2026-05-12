@@ -126,6 +126,7 @@ DEFAULT_CONFIG = {
     "auth_token": "",
     "data_dir": str(Path.home() / ".local" / "share" / "networkkit"),
     "log_level": "INFO",
+    "federation_peers": [],  # list of HTTP URLs for federated buses
 }
 
 
@@ -150,6 +151,10 @@ def load_config() -> dict[str, Any]:
         for k in ("host", "port", "zmq_port", "auth_token", "data_dir", "log_level"):
             if k in server:
                 cfg[k] = server[k]
+        if "federation_peers" in file_cfg:
+            cfg["federation_peers"] = file_cfg["federation_peers"]
+        elif "federation_peers" in server:
+            cfg["federation_peers"] = server["federation_peers"]
         logger.info("Config loaded from %s", path)
     # Env overrides
     for k, env_key in [("host", "NETWORKKIT_HOST"), ("port", "NETWORKKIT_PORT"),
@@ -176,10 +181,49 @@ async def send_message(message: Message):
         if message.message_type == MessageType.SYSTEM.value:
             _process_helo_ack(message)
         publisher.send_json(message.model_dump())
+        # Federation: buffer messages for non-local peers
+        _federation_outbox_maybe_enqueue(message)
         return {"status": "success"}
     except Exception as e:
         logger.error("Error sending message: %s", e)
         return {"status": "error"}
+
+
+# ── Federation Outbox (pull-based) ──────────────────────────────────
+# Messages for non-local peers are buffered here.
+# Remote buses poll GET /federation/outbox?for=agent1,agent2 to collect them.
+
+_federation_outbox: list[dict] = []
+_FEDERATION_OUTBOX_MAX = 200
+
+
+def _federation_outbox_maybe_enqueue(message: Message) -> None:
+    """Buffer message if target is not a local peer (for federation polling)."""
+    if not CONFIG.get("federation_peers"):
+        return
+    # Don't buffer federated messages (loop prevention)
+    if message.source.startswith("federated:"):
+        return
+    # Don't buffer HELO/ACK
+    if message.message_type == MessageType.SYSTEM.value:
+        try:
+            p = json.loads(message.content)
+            if p.get("type") in ("HELO", "ACK"):
+                return
+        except (json.JSONDecodeError, TypeError):
+            pass
+    # Don't buffer broadcasts
+    to = (message.to or "").strip()
+    if not to or to.upper() == "ALL":
+        return
+    # Only buffer if target is NOT a local peer
+    local_peer = ROUTING_TABLE.get_peer(to.lower())
+    if local_peer and local_peer.bus_origin == "local":
+        return
+    # Enqueue
+    _federation_outbox.append(message.model_dump())
+    if len(_federation_outbox) > _FEDERATION_OUTBOX_MAX:
+        _federation_outbox.pop(0)
 
 
 # ── Auth ────────────────────────────────────────────────────────────
@@ -357,7 +401,51 @@ async def peer_expiry_loop():
 async def lifespan(app: FastAPI):
     asyncio.create_task(scheduler_loop())
     asyncio.create_task(peer_expiry_loop())
+    # Start federation poll in a background thread (uses blocking requests)
+    import threading
+    t = threading.Thread(target=_federation_poll_thread, daemon=True)
+    t.start()
     yield
+
+
+def _federation_poll_thread():
+    """Poll federation peers in a background thread."""
+    import requests as _req
+    time.sleep(5)  # let peers register first
+    peers = CONFIG.get("federation_peers", [])
+    logger.info("Federation poll thread started (peers=%s)", peers)
+    if not peers:
+        return
+    while True:
+        try:
+            local_names = [
+                p["name"] for p in ROUTING_TABLE.list_peers()
+                if p.get("bus_origin") == "local"
+            ]
+            if not local_names:
+                time.sleep(3)
+                continue
+            agents_param = ",".join(local_names)
+            for peer_url in peers:
+                try:
+                    resp = _req.get(
+                        f"{peer_url}/federation/outbox",
+                        params={"for": agents_param},
+                        timeout=3,
+                    )
+                    if resp.status_code == 200:
+                        for msg_data in resp.json().get("messages", []):
+                            try:
+                                msg = Message(**msg_data)
+                                publisher.send_json(msg.model_dump())
+                                logger.info("Federation poll ← %s [%s→%s]", peer_url, msg.source, msg.to)
+                            except Exception:
+                                logger.warning("Federation poll: invalid message from %s", peer_url)
+                except Exception as e:
+                    logger.debug("Federation poll failed for %s: %s", peer_url, e)
+        except Exception:
+            logger.exception("Federation poll thread error")
+        time.sleep(3)
 
 
 app = FastAPI(lifespan=lifespan)
@@ -441,6 +529,30 @@ async def run_schedule(name: str, request: Request):
     )
     await send_message(msg)
     return {"status": "sent", "name": name}
+
+
+@app.get("/federation/outbox")
+async def federation_outbox(request: Request):
+    """Pull-based federation: remote buses poll this to collect messages for their local peers."""
+    if not _check_auth(request):
+        return JSONResponse({"status": "error", "detail": "unauthorized"}, status_code=401)
+    agents = request.query_params.get("for", "").strip()
+    if not agents:
+        return {"messages": []}
+    agent_set = {a.strip().lower() for a in agents.split(",") if a.strip()}
+    # Collect matching messages and remove from outbox
+    matched = []
+    remaining = []
+    for msg in _federation_outbox:
+        to = (msg.get("to") or "").strip().lower()
+        if to in agent_set:
+            msg["source"] = f"federated:{msg.get('source', 'unknown')}"
+            matched.append(msg)
+        else:
+            remaining.append(msg)
+    _federation_outbox.clear()
+    _federation_outbox.extend(remaining)
+    return {"messages": matched}
 
 
 # ── Entrypoint ──────────────────────────────────────────────────────
