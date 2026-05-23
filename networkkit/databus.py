@@ -180,8 +180,14 @@ async def send_message(message: Message):
             message.created_at = datetime.datetime.now().isoformat()
         if message.message_type == MessageType.SYSTEM.value:
             _process_helo_ack(message)
-        publisher.send_json(message.model_dump())
-        # Federation: buffer messages for non-local peers
+        # Strip federated: prefix before publishing to local subscribers
+        # (federation is a routing concern, agents should not see it)
+        is_federated = message.source.startswith("federated:")
+        publish_msg = message.model_copy()
+        if is_federated:
+            publish_msg.source = message.source.removeprefix("federated:")
+        publisher.send_json(publish_msg.model_dump())
+        # Federation: buffer messages for non-local peers (use original source for loop prevention)
         _federation_outbox_maybe_enqueue(message)
         return {"status": "success"}
     except Exception as e:
@@ -220,10 +226,28 @@ def _federation_outbox_maybe_enqueue(message: Message) -> None:
     local_peer = ROUTING_TABLE.get_peer(to.lower())
     if local_peer and local_peer.bus_origin == "local":
         return
-    # Enqueue
+    # Enqueue for pull-based federation (remote polls us)
     _federation_outbox.append(message.model_dump())
     if len(_federation_outbox) > _FEDERATION_OUTBOX_MAX:
         _federation_outbox.pop(0)
+    # Also push directly to federation peers (for when they can't poll us)
+    import threading
+    payload = message.model_dump()
+    payload["source"] = f"federated:{message.source}"
+    for peer_url in CONFIG.get("federation_peers", []):
+        threading.Thread(
+            target=_federation_push, args=(peer_url, payload), daemon=True
+        ).start()
+
+
+def _federation_push(peer_url: str, payload: dict) -> None:
+    """Push a message to a federation peer (fire-and-forget)."""
+    try:
+        import requests as _req
+        _req.post(f"{peer_url}/data", json=payload, timeout=5)
+        logger.info("Federation push → %s [%s→%s]", peer_url, payload.get("source", "?"), payload.get("to", "?"))
+    except Exception:
+        pass  # Silent fail — outbox is the backup
 
 
 # ── Auth ────────────────────────────────────────────────────────────
@@ -437,6 +461,9 @@ def _federation_poll_thread():
                         for msg_data in resp.json().get("messages", []):
                             try:
                                 msg = Message(**msg_data)
+                                # Strip federated: prefix — agents see clean source names
+                                if msg.source.startswith("federated:"):
+                                    msg.source = msg.source.removeprefix("federated:")
                                 publisher.send_json(msg.model_dump())
                                 logger.info("Federation poll ← %s [%s→%s]", peer_url, msg.source, msg.to)
                             except Exception:
