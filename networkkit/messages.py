@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
+from typing import Optional
 from pydantic import BaseModel, ConfigDict
-from enum import Enum
 
 """
 This module defines the message data structures used for communication within the NetworkKit framework. 
@@ -50,6 +50,8 @@ class Message(BaseModel):
     content: str
     created_at: str = None  # Optional, set to current time by default
     message_type: MessageType
+    id: Optional[str] = None  # Sender-generated message ID for correlation
+    in_reply_to: Optional[str] = None  # ID of the message this is responding to
 
     model_config = ConfigDict(use_enum_values=True)
 
@@ -58,9 +60,13 @@ class Message(BaseModel):
         Initializer for the Message class.
 
         If 'created_at' is not provided in the data dictionary, it will be automatically set to the current time.
+        If 'id' is not provided, a UUID will be generated.
         """
         if 'created_at' not in data or data['created_at'] is None:
             data['created_at'] = datetime.now().strftime("%a %Y-%m-%d %H:%M:%S")
+        if 'id' not in data or data['id'] is None:
+            import uuid
+            data['id'] = str(uuid.uuid4())[:8]
         super().__init__(**data)
 
     def prompt(self):
