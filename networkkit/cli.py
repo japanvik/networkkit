@@ -167,7 +167,12 @@ def cmd_peers(args):
 
 def cmd_send(args):
     text = args.content.replace("\\n", "\n")
-    body = {"source": args.source, "to": args.to, "content": text, "message_type": args.type}
+    # Auto-wrap plain text in JSON envelope (bus expects {"text": ...})
+    if not text.strip().startswith("{"):
+        content = json.dumps({"text": text}, ensure_ascii=False)
+    else:
+        content = text
+    body = {"source": args.source, "to": args.to, "content": content, "message_type": args.type}
     r = requests.post(_url("/data"), json=body, headers=_headers(), timeout=10)
     _out(r.json())
 
