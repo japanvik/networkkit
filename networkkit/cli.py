@@ -166,7 +166,8 @@ def cmd_peers(args):
 # ── Send command ────────────────────────────────────────────────────
 
 def cmd_send(args):
-    body = {"source": args.source, "to": args.to, "content": args.content, "message_type": args.type}
+    text = args.content.replace("\\n", "\n")
+    body = {"source": args.source, "to": args.to, "content": text, "message_type": args.type}
     r = requests.post(_url("/data"), json=body, headers=_headers(), timeout=10)
     _out(r.json())
 
