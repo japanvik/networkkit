@@ -186,7 +186,9 @@ async def send_message(message: Message):
         publish_msg = message.model_copy()
         if is_federated:
             publish_msg.source = message.source.removeprefix("federated:")
-        publisher.send_json(publish_msg.model_dump())
+        data = publish_msg.model_dump()
+        publisher.send_json(data, flags=zmq.NOBLOCK)
+        logger.debug("ZMQ published: %s→%s type=%s", data.get("source"), data.get("to"), data.get("message_type"))
         # Federation: buffer messages for non-local peers (use original source for loop prevention)
         _federation_outbox_maybe_enqueue(message)
         return {"status": "success"}
