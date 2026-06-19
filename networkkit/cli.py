@@ -216,7 +216,7 @@ def main():
     send.add_argument("content", help="Message content")
     send.add_argument("--to", default="ALL")
     send.add_argument("--source", default="netkit-cli")
-    send.add_argument("--type", default="INFO")
+    send.add_argument("--type", default="CHAT")
 
     args = p.parse_args()
     dispatch = {
